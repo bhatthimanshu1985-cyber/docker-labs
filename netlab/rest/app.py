@@ -124,8 +124,8 @@ def fgt_webui(scope: str = "global"):
                 "cpu": round(SIM.cpu(DEVICE)), "mem": round(SIM.mem(DEVICE)), "memory": round(SIM.mem(DEVICE)),
                 "disk": round(26 + 0.02 * uptime_s() / 86400), "session": SIM.sessions(DEVICE), "sessions": SIM.sessions(DEVICE),
                 "setup_rate": SIM.session_rate(DEVICE),
-                # 0 = normal; >0 when memory pressure is high (memory-leak scenario)
-                "conserve_mode": 1 if SIM.mem(DEVICE) > 88 else 0, "conserve_mode_status": "off" if SIM.mem(DEVICE) <= 88 else "on"}, path="web-ui", name="state")
+                # false = normal; true when memory pressure is high (memory-leak scenario)
+                "conserve_mode": SIM.mem(DEVICE) > 88, "conserve_mode_status": "off" if SIM.mem(DEVICE) <= 88 else "on"}, path="web-ui", name="state")
 
 
 @app.get("/api/v2/monitor/system/firmware")
