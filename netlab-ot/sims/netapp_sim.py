@@ -193,12 +193,28 @@ def cluster():
             "management_interfaces": [{"name": "cluster_mgmt", "ip": {"address": "192.168.50.10"}}], "health": "ok" if not any(node_state(n) == "down" for n in NODES) else "degraded"}
 
 
+def node_rec(i, n):
+    ot = bool(lab.fault("overtemp", n))
+    return {"uuid": U(n), "name": n, "state": node_state(n), "uptime": int(3_542_000 + time.time() - T0) if node_state(n) == "up" else 0, "model": "AFF-A400",
+            "serial_number": "9000" + str(i) * 6, "version": {"full": "NetApp Release 9.12.1P4"}, "ha": {"enabled": True, "partners": [{"name": NODES[1 - i]}],
+            "giveback": {"state": "nothing_to_giveback" if node_state(n) == "up" else "failed"}},
+            "controller": {"over_temperature": "over" if ot else "normal",
+                           "failed_fan": {"count": 0, "message": {"message": "There are no failed fans.", "code": "0"}},
+                           "failed_power_supply": {"count": 0, "message": {"message": "There are no failed power supplies.", "code": "0"}},
+                           "frus": [{"id": "1", "type": "psu", "state": "ok"}, {"id": "2", "type": "psu", "state": "ok"}, {"id": "1", "type": "fan", "state": "ok"}]},
+            "metrocluster": {"type": "none"}, "location": "Lab Rack C", "membership": "member", "is_spares_low": False}
+
+
 @app.get("/api/cluster/nodes")
 def nodes(request: Request):
-    return recs([{"uuid": U(n), "name": n, "state": node_state(n), "uptime": int(3_542_000 + time.time() - T0) if node_state(n) == "up" else 0, "model": "AFF-A400",
-                  "serial_number": "9000" + str(i) * 6, "version": {"full": "NetApp Release 9.12.1P4"}, "ha": {"enabled": True, "partners": [{"name": NODES[1 - i]}],
-                  "giveback": {"state": "nothing_to_giveback" if node_state(n) == "up" else "failed"}},
-                  "controller": {"over_temperature": "over" if lab.fault("overtemp", n) else "normal"}} for i, n in enumerate(NODES)], request)
+    return recs([node_rec(i, n) for i, n in enumerate(NODES)], request)
+
+
+@app.get("/api/cluster/nodes/{nid}")
+def node_one(nid: str):
+    for i, n in enumerate(NODES):
+        if U(n) == nid: return node_rec(i, n)
+    return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "uuid"}}, 404)
 
 
 @app.get("/api/storage/aggregates")
