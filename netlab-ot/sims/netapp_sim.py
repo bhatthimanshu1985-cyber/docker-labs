@@ -113,7 +113,7 @@ def disk_rec(d):
             "outage": {"persistently_failed": bool(broken), "reason": "failed" if broken else "none"},
             "stats": {"throughput": int(wave(4e6, 1e6, .1)) if not broken else 0, "iops_total": int(wave(90, 30, .1)) if not broken else 0,
                       "average_latency": int(wave(350, 60, .2)), "path_error_count": 0, "power_on_hours": 5120},
-            "error": [{"type": "missing", "message": "disk missing"}] if broken else [],
+            **({"error": [{"type": "missing", "message": "disk missing"}]} if broken else {}),
             "self_encrypting": False, "fips_certified": False, "local": True}
 
 
@@ -244,13 +244,13 @@ def aggr(aid: str):
 def _ctr(name, val): return {"name": name, "value": int(val)}
 
 
-def _split(rows):
+def _split(rows, tname="volume:node"):
     """Real ONTAP: counters under 'counters', node.name etc. under 'properties'."""
     out = []
     for r in rows:
         props = [p for p in r["properties"] if not isinstance(p["value"], int) or p["name"].endswith(".name")]
         ctrs = [p for p in r["properties"] if p not in props]
-        out.append({"id": r["id"], "properties": props, "counters": ctrs})
+        out.append({"id": r["id"], "counter_table": {"name": tname}, "properties": props, "counters": ctrs, "_links": {"self": {"href": f"/api/cluster/counter/tables/{tname}/rows/{r['id']}"}}})
     return out
 
 
@@ -291,12 +291,12 @@ def counter_table(table: str):
 
 @app.get("/api/cluster/counter/tables/{table}/rows")
 def counter_rows_ep(table: str, request: Request):
-    return recs(_split(counter_rows(table)), request)
+    return recs(_split(counter_rows(table), table), request)
 
 
 @app.get("/api/cluster/counter/tables/{table}/rows/{rid}")
 def counter_row(table: str, rid: str):
-    for r in _split(counter_rows(table)):
+    for r in _split(counter_rows(table), table):
         if r["id"] == rid: return r
     return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "id"}}, 404)
 
