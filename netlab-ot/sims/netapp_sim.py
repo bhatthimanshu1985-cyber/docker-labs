@@ -106,7 +106,12 @@ def disk_rec(d):
     broken = lab.fault("disk_fail", d)
     n = NODES[0] if int(d.split(".")[2]) < 12 else NODES[1]
     return {"name": d, "uid": U(d), "serial_number": "S3" + d.replace(".", ""), "model": "X371_S163A960ATE", "type": "ssd", "usable_size": 960 * 10 ** 9,
-            "state": "broken" if broken else "present", "container_type": "broken" if broken else "aggregate", "node": {"name": n}, "bay": int(d.split(".")[2])}
+            "state": "broken" if broken else "present", "container_type": "broken" if broken else "aggregate", "node": {"name": n, "uuid": U(n)},
+            "home_node": {"name": n, "uuid": U(n)}, "bay": int(d.split(".")[2]) % 12, "shelf": {"uid": U("shelf" + n), "name": "1.0", "bay": int(d.split(".")[2]) % 12},
+            "pool": "pool0", "class": "solid_state", "vendor": "NETAPP", "firmware_version": "NA51", "rpm": 0, "rated_life_used_percent": 3,
+            "aggregates": [] if broken else [{"name": "aggr0_n1" if int(d.split(".")[2]) < 4 else ("aggr1_n1" if int(d.split(".")[2]) < 12 else "aggr1_n2"), "uuid": U("aggr")}],
+            **({"outage": {"reason": "failed"}} if broken else {}),
+            "self_encrypting": False, "fips_certified": False, "local": True}
 
 
 def ports():
