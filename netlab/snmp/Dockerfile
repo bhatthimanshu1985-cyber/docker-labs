@@ -1,8 +1,12 @@
 FROM python:3.11-slim
-RUN pip install --no-cache-dir snmpsim-lextudio
+RUN pip install --no-cache-dir snmpsim-lextudio tzdata
+ENV TZ=Europe/Berlin SCENARIO_FILE=/srv/scenarios/scenarios.json SIMCORE_PATH=/srv
 WORKDIR /srv
-COPY gen.py .
-RUN python gen.py /srv/data
+COPY shared/simcore.py snmp/gen.py snmp/proxy.py snmp/start.sh ./
+COPY snmp/variation ./variation
+# default scenario file (compose bind-mounts ./scenarios over this so it can be edited live)
+COPY scenarios/scenarios.json ./scenarios/scenarios.json
+RUN python gen.py /srv/scenarios/scenarios.json /srv/data && chmod +x start.sh
 EXPOSE 161/udp
-# community string = file name: fortigate, cisco-router, cisco-switch, switch
-CMD ["snmpsim-command-responder", "--data-dir=/srv/data", "--agent-udpv4-endpoint=0.0.0.0:161", "--process-user=nobody", "--process-group=nogroup"]
+# community string = device (fortigate | cisco-router | cisco-switch | switch); SNMPv3 user "simulator", context = device name
+CMD ["./start.sh"]

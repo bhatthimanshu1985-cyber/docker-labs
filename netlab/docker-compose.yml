@@ -1,11 +1,13 @@
 services:
   snmp:
-    build: ./snmp
+    build: {context: ., dockerfile: snmp/Dockerfile}
     ports:
-      - "161:161/udp"
+      - "1161:161/udp"   # host port 1161: the host's own snmpd usually owns 161. Use "161:161/udp" if it is free.
+    volumes:
+      - ./scenarios:/srv/scenarios:ro      # edit scenarios/scenarios.json -> picked up within ~2 s
     restart: unless-stopped
   rest:
-    build: ./rest
+    build: {context: ., dockerfile: rest/Dockerfile}
     ports:
       - "8441:8441"   # FortiGate
       - "8442:8442"   # Cisco router
@@ -16,4 +18,7 @@ services:
       FGT_TOKEN: "fgt-test-token"
       CISCO_USER: "admin"
       CISCO_PASS: "admin"
+      API_LOG: "1"             # log every API request (docker compose logs -f rest) - handy to see what a PRTG sensor calls
+    volumes:
+      - ./scenarios:/srv/scenarios:ro
     restart: unless-stopped

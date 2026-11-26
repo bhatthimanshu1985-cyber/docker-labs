@@ -1,8 +1,11 @@
 """Mock REST APIs: FortiGate (FortiOS REST), Cisco IOS-XE RESTCONF, generic switch.
 Which device an instance pretends to be is set by env DEVICE (fortigate|cisco-router|cisco-switch|switch)."""
-import base64, math, os, time
+import asyncio, base64, math, os, random, sys, time
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+
+sys.path.insert(0, os.getenv("SIMCORE_PATH", "/srv"))
+from simcore import SIM
 
 DEVICE = os.getenv("DEVICE", "fortigate")
 FGT_TOKEN = os.getenv("FGT_TOKEN", "fgt-test-token")
@@ -11,15 +14,29 @@ T0 = time.time()
 app = FastAPI(title=f"mock {DEVICE}")
 
 
-def wave(base, amp, rate, lo=0, hi=100, phase=0.0):
-    return round(min(hi, max(lo, base + amp * math.sin((time.time() - T0) * rate + phase))), 1)
-
-
-def counter(bps):
-    return int(bps * (time.time() - T0) + 5_000_000_000)
+IPS = {"wan1": "203.0.113.2", "wan2": "198.51.100.2", "lan": "192.168.1.1", "dmz": "10.10.10.1", "ssl.root": "",
+       "GigabitEthernet0/0/0": "10.0.0.1", "GigabitEthernet0/0/1": "10.0.1.1", "Tunnel0": "172.16.0.1"}
+VERBOSE = os.getenv("API_LOG", "1") == "1"
 
 
 # ------------------------------------------------------------------ auth
+@app.middleware("http")
+async def behaviour(request: Request, call_next):
+    """network behaviour of the simulated device: unreachable/outage/reboot -> hang then 504, loss -> 504, latency"""
+    n = SIM.net(DEVICE)
+    if VERBOSE:
+        print(f"[{DEVICE}] {request.method} {request.url.path}?{request.url.query}", flush=True)
+    if n["down"]:
+        await asyncio.sleep(20)
+        return JSONResponse({"error": "gateway timeout (device unreachable)"}, 504)
+    if n["loss_pct"] and random.random() * 100 < n["loss_pct"]:
+        await asyncio.sleep(10)
+        return JSONResponse({"error": "gateway timeout"}, 504)
+    lo, hi = n["latency_ms"]
+    await asyncio.sleep(random.uniform(lo, hi) / 1000)
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def auth(request: Request, call_next):
     p = request.url.path
@@ -45,54 +62,130 @@ async def auth(request: Request, call_next):
 def health(): return {"ok": True, "device": DEVICE}
 
 
-# ------------------------------------------------------------------ metrics
-def cpu():  return wave(22, 12, 0.07) if DEVICE == "fortigate" else wave(12, 5, 0.05)
-def mem():  return wave(48, 5, 0.03) if DEVICE == "fortigate" else wave(30, 3, 0.03)
-def sessions(): return int(wave(5200, 1500, 0.04, 0, 100000))
+# ------------------------------------------------------------------ metrics (all from simcore, same values SNMP serves)
+def cpu(): return round(SIM.cpu(DEVICE), 1)
+def mem(): return round(SIM.mem(DEVICE), 1)
+def sessions(): return SIM.sessions(DEVICE)
 
 
 def interfaces():
-    spec = {"fortigate": [("wan1", "203.0.113.2", True, 4_000_000, 1_500_000), ("wan2", "198.51.100.2", False, 0, 0),
-                          ("lan", "192.168.1.1", True, 1_500_000, 4_000_000), ("dmz", "10.10.10.1", True, 200_000, 100_000)],
-            "cisco-router": [("GigabitEthernet0/0/0", "10.0.0.1", True, 2_500_000, 1_200_000), ("GigabitEthernet0/0/1", "10.0.1.1", True, 900_000, 1_800_000),
-                             ("GigabitEthernet0/0/2", "", False, 0, 0), ("Tunnel0", "172.16.0.1", True, 150_000, 120_000)],
-            "cisco-switch": [(f"GigabitEthernet1/0/{n}", "", n not in (5, 9), 300_000 + n * 70_000, 200_000 + n * 40_000) for n in range(1, 13)],
-            "switch": [(f"port{n}", "", n != 4, 200_000 + n * 50_000, 150_000 + n * 30_000) for n in range(1, 9)]}[DEVICE]
-    return [dict(name=n, ip=ip, up=up, rx=counter(rx) if up else 0, tx=counter(tx) if up else 0) for n, ip, up, rx, tx in spec]
+    out = []
+    for name in SIM.dev(DEVICE).get("interfaces", {}):
+        v = SIM.iface(DEVICE, name)
+        out.append(dict(name=name, ip=IPS.get(name, ""), up=v["up"], rx=v["in_oct"], tx=v["out_oct"], rxe=v["in_err"], txe=v["out_err"],
+                        rxd=v["in_disc"], txd=v["out_disc"], rxbps=v["in_bps"], txbps=v["out_bps"],
+                        speed=SIM.iface_cfg(DEVICE, name).get("speed", 0)))
+    return out
+
+
+def uptime_s(): return int(SIM.uptime_ticks(DEVICE) / 100)
 
 
 # ------------------------------------------------------------------ FortiGate (FortiOS REST)
+SERIAL = "FGT60FTK00000001"
+
+
 def fgt(results, **extra):
     return {"http_method": "GET", "results": results, "vdom": "root", "status": "success", "http_status": 200,
-            "serial": "FGT60FTK00000001", "version": "v7.2.5", "build": 1517, **extra}
+            "serial": SERIAL, "version": "v7.2.5", "build": 1517, **extra}
+
+
+def hist(fn, windows=((60, "1-min"), (600, "10-min"), (1800, "30-min"))):
+    now, out = time.time(), {}
+    for w, label in windows:
+        xs = [fn(now - w * i / 8) for i in range(8)]
+        out[label] = {"min": min(xs), "max": max(xs), "average": round(sum(xs) / len(xs))}
+    return out
 
 
 @app.get("/api/v2/monitor/system/status")
 def fgt_status():
-    return fgt({"model_name": "FortiGate", "model_number": "60F", "model": "FGT60F", "hostname": "FGT-LAB-01", "log_disk_status": "available"},
-               )
+    return fgt({"model_name": "FortiGate", "model_number": "60F", "model": "FGT60F", "hostname": "FGT-LAB-01", "log_disk_status": "available",
+                "uptime": uptime_s()}, path="system", name="status", action="")
+
+
+@app.get("/api/v2/monitor/system/firmware")
+def fgt_fw():
+    return fgt({"current": {"platform-id": "FGT60F", "major": 7, "minor": 2, "patch": 5, "build": 1517, "version": "v7.2.5", "release-type": "GA"}})
 
 
 @app.get("/api/v2/monitor/system/resource/usage")
-def fgt_usage():
-    return fgt({"cpu": [{"current": cpu()}], "mem": [{"current": mem()}], "session": [{"current": sessions()}],
-                "setup_rate": [{"current": int(wave(180, 60, 0.09, 0, 5000))}], "disk": [{"current": wave(31, 1, 0.01)}]})
+def fgt_usage(request: Request):
+    """FortiOS system resource usage: cpu, mem, disk, session, setup_rate (+ ipv6/npu counterparts) with 1/10/30-min history"""
+    t = time.time()
+    r = {"cpu": [{"current": round(SIM.cpu(DEVICE, t)), "historical": hist(lambda x: round(SIM.cpu(DEVICE, x)))}],
+         "mem": [{"current": round(SIM.mem(DEVICE, t)), "historical": hist(lambda x: round(SIM.mem(DEVICE, x)))}],
+         "disk": [{"current": round(26 + 0.02 * uptime_s() / 86400)}],
+         "session": [{"current": SIM.sessions(DEVICE, t), "historical": hist(lambda x: SIM.sessions(DEVICE, x))}],
+         "setup_rate": [{"current": SIM.session_rate(DEVICE, t), "historical": hist(lambda x: SIM.session_rate(DEVICE, x))}],
+         "session6": [{"current": 0}], "setup_rate6": [{"current": 0}], "npu_session": [{"current": 0}],
+         "faz_log_rate": [{"current": 0}], "fds_log_rate": [{"current": 0}]}
+    res = request.query_params.get("resource")
+    if res:
+        r = {k: v for k, v in r.items() if k in res.split(",")}
+    return fgt(r, path="system", name="resource", action="usage")
+
+
+@app.get("/api/v2/monitor/system/performance/status")
+def fgt_perf():
+    c = SIM.cpu_cores(DEVICE, time.time())
+    return fgt({"cpu": {"user": round(SIM.cpu(DEVICE) * 0.6), "system": round(SIM.cpu(DEVICE) * 0.3), "nice": 0, "idle": round(100 - SIM.cpu(DEVICE)),
+                        "iowait": 0, "irq": 0, "softirq": round(SIM.cpu(DEVICE) * 0.1)},
+                "cores": [round(x) for x in c], "mem": {"total": 4_000_000_000, "used": int(SIM.mem(DEVICE) / 100 * 4e9)},
+                "uptime": uptime_s(), "session": SIM.sessions(DEVICE)})
 
 
 @app.get("/api/v2/monitor/system/interface")
 def fgt_if():
-    return fgt({i["name"]: {"id": i["name"], "name": i["name"], "ip": i["ip"], "link": i["up"], "speed": 1000 if i["up"] else 0,
-                            "rx_bytes": i["rx"], "tx_bytes": i["tx"], "rx_errors": 0, "tx_errors": 0} for i in interfaces()})
+    return fgt({i["name"]: {"id": i["name"], "name": i["name"], "ip": i["ip"], "mask": 24, "link": i["up"], "speed": (i["speed"] // 1_000_000) if i["up"] else 0,
+                            "duplex": 1, "tx_packets": i["tx"] // 800, "rx_packets": i["rx"] // 800, "tx_bytes": i["tx"], "rx_bytes": i["rx"],
+                            "tx_errors": i["txe"], "rx_errors": i["rxe"]} for i in interfaces()}, path="system", name="interface")
+
+
+def _vpn_list():
+    out = []
+    for n, (name, v) in enumerate(SIM.dev(DEVICE).get("vpn", {}).items(), 1):
+        s = SIM.vpn(DEVICE, name)
+        up = s["up"]
+        px = {"proxy_src": [{"subnet": f"10.{n}.0.0/16", "port": 0, "protocol": 0, "protocol_name": "all"}],
+              "proxy_dst": [{"subnet": f"172.16.{n}.0/24", "port": 0, "protocol": 0, "protocol_name": "all"}],
+              "status": "up" if up else "down", "p2name": name, "p2serial": n, "expire": 3600 if up else 0,
+              "incoming_bytes": s["in"], "outgoing_bytes": s["out"]}
+        out.append({"proxyid": [px], "name": name, "comments": "", "wizard-type": "custom", "connection_count": 1 if up else 0,
+                    "creation_time": int(time.time()) - 86400 if up else 0, "username": "", "type": "automatic",
+                    "incoming_bytes": s["in"], "outgoing_bytes": s["out"], "rgwy": v.get("remote", "192.0.2.10"), "tun_id": f"10.0.0.{n}", "tun_id6": "::"})
+    return out
 
 
 @app.get("/api/v2/monitor/vpn/ipsec")
 def fgt_vpn():
-    return fgt([{"name": "Site-to-HQ", "rgwy": "192.0.2.10", "status": "up", "incoming_bytes": counter(90_000), "outgoing_bytes": counter(70_000)},
-                {"name": "Site-to-Branch", "rgwy": "192.0.2.20", "status": "down", "incoming_bytes": 0, "outgoing_bytes": 0}])
+    return fgt(_vpn_list(), path="vpn", name="ipsec")
+
+
+def _ssl_users():
+    n = SIM.ssl_users(DEVICE)
+    return [{"user_name": f"vpnuser{i + 1}", "user_group": "SSL-VPN-Users", "remote_host": f"203.0.113.{10 + i}", "last_login_time": int(time.time()) - 600 * (i + 1),
+             "auth_type": 1, "subsessions": [{"aip": f"10.212.134.{200 + i}", "in_bytes": 120000 * (i + 1), "out_bytes": 480000 * (i + 1), "type": "tunnel"}]} for i in range(n)]
+
+
+@app.get("/api/v2/monitor/vpn/ssl")
+def fgt_ssl(): return fgt(_ssl_users(), path="vpn", name="ssl")
+
+
+@app.get("/api/v2/monitor/vpn/ssl/stats")
+def fgt_ssl_stats():
+    n = SIM.ssl_users(DEVICE)
+    return fgt({"user_count": n, "max_users": 50, "web_mode_connections": 0, "tunnel_mode_connections": n, "tunnel_users": n})
 
 
 @app.get("/api/v2/monitor/system/ha-peer")
-def fgt_ha(): return fgt([{"serial_no": "FGT60FTK00000001", "hostname": "FGT-LAB-01", "primary": True, "status": "up"}])
+def fgt_ha(): return fgt([{"serial_no": SERIAL, "hostname": "FGT-LAB-01", "primary": True, "status": "up"}])
+
+
+@app.get("/api/v2/monitor/firewall/session/summary")
+def fgt_ses():
+    n = SIM.sessions(DEVICE)
+    return fgt({"session_count": n, "setup_rate": SIM.session_rate(DEVICE), "tcp": int(n * 0.78), "udp": int(n * 0.2), "icmp": int(n * 0.02)})
 
 
 @app.get("/api/v2/cmdb/firewall/policy")
@@ -118,43 +211,50 @@ def cx_ver(): return yang({"Cisco-IOS-XE-native:version": "17.6"})
 
 @app.get("/restconf/data/Cisco-IOS-XE-process-cpu-oper:cpu-usage/cpu-utilization")
 def cx_cpu():
-    return yang({"Cisco-IOS-XE-process-cpu-oper:cpu-utilization": {"five-seconds": int(cpu()), "one-minute": int(wave(12, 4, 0.05)), "five-minutes": int(wave(11, 2, 0.02))}})
+    t = time.time()
+    return yang({"Cisco-IOS-XE-process-cpu-oper:cpu-utilization": {"five-seconds": round(SIM.cpu(DEVICE, t)), "one-minute": round(SIM.cpu_avg(DEVICE, t, 60)),
+                                                                   "five-minutes": round(SIM.cpu_avg(DEVICE, t, 300))}})
 
 
 @app.get("/restconf/data/Cisco-IOS-XE-memory-oper:memory-statistics/memory-statistic")
 def cx_mem():
-    used = int(wave(1_200_000_000, 80_000_000, 0.03, 0, 4e9)); total = 4_000_000_000
+    total = 4_000_000_000; used = int(SIM.mem(DEVICE) / 100 * total)
     return yang({"Cisco-IOS-XE-memory-oper:memory-statistic": [{"name": "Processor", "total-memory": total, "used-memory": used, "free-memory": total - used}]})
 
 
 @app.get("/restconf/data/ietf-interfaces:interfaces-state/interface")
 def cx_if():
     return yang({"ietf-interfaces:interface": [{"name": i["name"], "type": "iana-if-type:ethernetCsmacd", "admin-status": "up",
-                 "oper-status": "up" if i["up"] else "down", "speed": 1000000000,
-                 "statistics": {"in-octets": i["rx"], "out-octets": i["tx"], "in-errors": 0, "out-errors": 0}} for i in interfaces()]})
+                 "oper-status": "up" if i["up"] else "down", "speed": i["speed"],
+                 "statistics": {"in-octets": i["rx"], "out-octets": i["tx"], "in-errors": i["rxe"], "out-errors": i["txe"],
+                                "in-discards": i["rxd"], "out-discards": i["txd"]}} for i in interfaces()]})
 
 
 @app.get("/restconf/data/Cisco-IOS-XE-environment-oper:environment-sensors/environment-sensor")
 def cx_env():
     return yang({"Cisco-IOS-XE-environment-oper:environment-sensor": [{"name": "Chassis Temperature", "location": "Switch 1", "state": "Normal",
-                 "current-reading": int(wave(38, 3, 0.01, 0, 120)), "sensor-units": "Celsius"}]})
+                 "current-reading": round(SIM.temp(DEVICE)), "sensor-units": "Celsius"}]})
 
 
 # ------------------------------------------------------------------ generic switch
 @app.get("/api/status")
 def sw_status():
-    return {"hostname": "SW-ACCESS-02", "model": "24-port GbE managed switch", "uptime_s": int(time.time() - T0) + 8_640_000,
-            "temperature_c": wave(41, 3, 0.01, 0, 120), "ports": [{"name": i["name"], "link": i["up"], "rx_bytes": i["rx"], "tx_bytes": i["tx"]} for i in interfaces()]}
+    return {"hostname": "SW-ACCESS-02", "model": "24-port GbE managed switch", "uptime_s": uptime_s(),
+            "temperature_c": round(SIM.temp(DEVICE), 1), "ports": [{"name": i["name"], "link": i["up"], "rx_bytes": i["rx"], "tx_bytes": i["tx"],
+                                                                      "rx_errors": i["rxe"], "tx_errors": i["txe"]} for i in interfaces()]}
 
 
 # ------------------------------------------------------------------ PRTG "REST Custom v2" ready JSON (no auth)
+# NOTE: existing sensors read channels by position, so new channels are only ever appended.
 @app.get("/prtg/sensors")
 def prtg():
     ifs = interfaces()
     res = [{"channel": "CPU", "value": cpu(), "unit": "Percent", "float": 1}, {"channel": "Memory", "value": mem(), "unit": "Percent", "float": 1},
            {"channel": "Interfaces up", "value": sum(i["up"] for i in ifs)}, {"channel": "Interfaces down", "value": sum(not i["up"] for i in ifs)}]
     if DEVICE == "fortigate":
-        res += [{"channel": "Sessions", "value": sessions()}, {"channel": "IPsec tunnels up", "value": 1}]
+        res += [{"channel": "Sessions", "value": sessions()}, {"channel": "IPsec tunnels up", "value": sum(v["up"] for v in (SIM.vpn(DEVICE, n) for n in SIM.dev(DEVICE).get("vpn", {})))}]
     if DEVICE != "switch":
-        res.append({"channel": "Temperature", "value": wave(38, 3, 0.01, 0, 120), "unit": "Temperature", "float": 1})
+        res.append({"channel": "Temperature", "value": round(SIM.temp(DEVICE), 1), "unit": "Temperature", "float": 1})
+    res.append({"channel": "Uptime", "value": uptime_s(), "unit": "TimeSeconds"})
+    res.append({"channel": "Errors total", "value": sum(i["rxe"] + i["txe"] for i in ifs), "mode": "Difference"})
     return {"prtg": {"result": res, "text": f"{DEVICE} simulated"}}
