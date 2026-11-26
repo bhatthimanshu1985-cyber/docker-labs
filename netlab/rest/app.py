@@ -104,6 +104,18 @@ def fgt_status():
                 "uptime": uptime_s()}, path="system", name="status", action="")
 
 
+@app.get("/api/v2/monitor/system/time/select")
+def fgt_time():
+    t = time.time(); lt = time.localtime(t)
+    return fgt({"time": int(t), "iso_time": time.strftime("%Y-%m-%dT%H:%M:%S", lt), "timezone": time.strftime("%Z", lt), "year": lt.tm_year,
+                "month": lt.tm_mon, "day": lt.tm_mday, "hour": lt.tm_hour, "minute": lt.tm_min, "second": lt.tm_sec}, path="system", name="time", action="select")
+
+
+@app.get("/api/v2/cmdb/system/vdom")
+def fgt_vdom():
+    return fgt([{"name": "root", "short-name": "root", "q_origin_key": "root", "flag": 0, "temporary": 0}], path="system", name="vdom")
+
+
 @app.get("/api/v2/monitor/system/firmware")
 def fgt_fw():
     return fgt({"current": {"platform-id": "FGT60F", "major": 7, "minor": 2, "patch": 5, "build": 1517, "version": "v7.2.5", "release-type": "GA"}})
