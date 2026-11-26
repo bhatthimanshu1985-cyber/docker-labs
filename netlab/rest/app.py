@@ -141,11 +141,11 @@ def fgt_usage(request: Request):
     t = time.time()
     r = {"cpu": [{"current": round(SIM.cpu(DEVICE, t)), "historical": hist(lambda x: round(SIM.cpu(DEVICE, x)))}],
          "mem": [{"current": round(SIM.mem(DEVICE, t)), "historical": hist(lambda x: round(SIM.mem(DEVICE, x)))}],
-         "disk": [{"current": round(26 + 0.02 * uptime_s() / 86400)}],
+         "disk": [{"current": round(26 + 0.02 * uptime_s() / 86400), "historical": hist(lambda x: round(26 + 0.02 * uptime_s() / 86400))}],
          "session": [{"current": SIM.sessions(DEVICE, t), "historical": hist(lambda x: SIM.sessions(DEVICE, x))}],
-         "setup_rate": [{"current": SIM.session_rate(DEVICE, t), "historical": hist(lambda x: SIM.session_rate(DEVICE, x))}],
-         "session6": [{"current": 0}], "setup_rate6": [{"current": 0}], "npu_session": [{"current": 0}],
-         "faz_log_rate": [{"current": 0}], "fds_log_rate": [{"current": 0}]}
+         "setup_rate": [{"current": SIM.session_rate(DEVICE, t), "historical": hist(lambda x: SIM.session_rate(DEVICE, x))}]}
+    for k in ("session6", "setup_rate6", "npu_session", "faz_log_rate", "fds_log_rate", "disk_lograte", "ses_rate"):
+        r[k] = [{"current": 0, "historical": hist(lambda x: 0)}]
     res = request.query_params.get("resource")
     if res:
         r = {k: v for k, v in r.items() if k in res.split(",")}
