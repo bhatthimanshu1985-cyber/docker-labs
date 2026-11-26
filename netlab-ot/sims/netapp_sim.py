@@ -110,7 +110,7 @@ def disk_rec(d):
             "home_node": {"name": n, "uuid": U(n)}, "bay": int(d.split(".")[2]) % 12, "shelf": {"uid": U("shelf" + n), "name": "1.0", "bay": int(d.split(".")[2]) % 12},
             "pool": "pool0", "class": "solid_state", "vendor": "NETAPP", "firmware_version": "NA51", "rpm": 0, "rated_life_used_percent": 3,
             "aggregates": [] if broken else [{"name": "aggr0_n1" if int(d.split(".")[2]) < 4 else ("aggr1_n1" if int(d.split(".")[2]) < 12 else "aggr1_n2"), "uuid": U("aggr")}],
-            "outage": {"persistently_failed": bool(broken), "reason": "failed" if broken else "none"},
+            "outage": {"persistently_failed": bool(broken), "reason": {"message": "disk failed" if broken else "none", "code": "72351744" if broken else "0"}},
             "stats": {"throughput": int(wave(4e6, 1e6, .1)) if not broken else 0, "iops_total": int(wave(90, 30, .1)) if not broken else 0,
                       "average_latency": int(wave(350, 60, .2)), "path_error_count": 0, "power_on_hours": 5120},
             **({"error": [{"type": "missing", "message": "disk missing"}]} if broken else {}),
@@ -254,6 +254,20 @@ def _split(rows, tname="volume:node"):
     return out
 
 
+def _proto(v, ops):
+    """per-protocol volume counters (cifs/nfs/fcp/iscsi) as ONTAP exposes them"""
+    svm = VOLS[v][0]
+    share = {"cifs": 1.0 if svm == "svm_cifs" else 0.0, "nfs": 0.0 if svm == "svm_cifs" else 1.0, "fcp": 0.0, "iscsi": 0.0}
+    if v == "vol_vmware_ds1": share.update({"nfs": 0.6, "iscsi": 0.4})
+    out = []
+    for p, f in share.items():
+        o = ops * f
+        out += [_ctr(f"{p}_read_ops", o * .7), _ctr(f"{p}_write_ops", o * .3), _ctr(f"{p}_other_ops", o * .02), _ctr(f"{p}_total_ops", o * 1.02),
+                _ctr(f"{p}_read_data", o * .7 * 8192), _ctr(f"{p}_write_data", o * .3 * 4096), _ctr(f"{p}_other_data", 0),
+                _ctr(f"{p}_read_latency", o * .7 * 400), _ctr(f"{p}_write_latency", o * .3 * 560), _ctr(f"{p}_other_latency", o * 10)]
+    return out
+
+
 def counter_rows(table):
     """ONTAP counter-manager rows (cumulative raw counters, like real ONTAP)."""
     e = time.time() - T0 + 1_000_000
@@ -267,7 +281,9 @@ def counter_rows(table):
                 _ctr("read_data", ops * .7 * 8192), _ctr("write_data", ops * .3 * 4096), _ctr("other_data", 0),
                 _ctr("read_latency", ops * .7 * 400), _ctr("write_latency", ops * .3 * 560), _ctr("other_latency", e * 600),
                 _ctr("total_data", ops * 6963), _ctr("avg_latency", ops * 440),
-                {"name": "node.name", "value": NODES[0 if VOLS[v][1].endswith("n1") else 1]}]})
+                _ctr("bytes_read", ops * .7 * 8192), _ctr("bytes_written", ops * .3 * 4096)]
+                + _proto(v, ops) +
+                [{"name": "node.name", "value": NODES[0 if VOLS[v][1].endswith("n1") else 1]}]})
     else:
         for n in NODES:
             ops = int(e * 2500)
