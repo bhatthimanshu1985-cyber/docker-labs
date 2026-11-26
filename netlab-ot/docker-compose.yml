@@ -28,7 +28,7 @@ services:
   netapp-sim:
     build: ./sims
     command: python netapp_sim.py
-    ports: ["8081:8080", "443:443"]   # ONTAP REST/ZAPI: HTTP on host 8081 (8080 is used by prtg-target), HTTPS 443 (+ /_lab control API)
+    ports: ["8081:8080", "4443:443"]   # ONTAP REST/ZAPI: HTTP host 8081, HTTPS host 4443 (VM already uses 8080 and 443) (+ /_lab control API)
     environment: { ONTAP_USER: admin, ONTAP_PASS: netapp123 }
     volumes: ["./logs:/logs"]
     restart: unless-stopped

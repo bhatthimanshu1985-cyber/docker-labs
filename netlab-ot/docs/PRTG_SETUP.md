@@ -36,7 +36,7 @@ Coils 0-2 and discrete inputs 0-2 exist on unit 1 (door, e-stop, overtemp alarm)
 Status topics: `factory/<device>/status` (retained `online` / `offline` via Last Will).
 Reproduce: `mqtt-stale-data` (sensor keeps its old value / no new message), `mqtt-garbage-payload` (JSONPath fails), `mqtt-device-dropout`.
 
-## NetApp - HTTPS 443 (or HTTP 8081), user `admin` / `netapp123`
+## NetApp - HTTPS 4443 (or HTTP 8081; container ports 443/8080), set the port in the device credentials, user `admin` / `netapp123`
 Put the credentials on the device (PRTG NetApp v2 sensors read them from the parent device).
 | PRTG sensor | API used | Lab data |
 |---|---|---|
