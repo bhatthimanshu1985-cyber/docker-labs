@@ -29,7 +29,8 @@ FortiGate (8441, FortiOS 7.2 format): `/api/v2/monitor/system/{status,resource/u
 → for PRTG **FortiGate System Statistics** and **FortiGate VPN Overview** sensors.
 Cisco RESTCONF (8442/8443), switch `/api/status` (8444), PRTG-ready JSON `/prtg/sensors` on all.
 `API_LOG=1` logs every request (`docker compose logs -f rest`) to see exactly what a sensor calls.
-Set `TLS=1` for HTTPS (self-signed).
+FortiGate over HTTPS (self-signed) on **8445** - PRTG's built-in FortiGate sensors need TLS, set the credential port to 8445.
+Set `TLS=1` to make all ports HTTPS.
 
 ## Limits
 Synthetic data; only the OIDs/endpoints implemented respond. Not a full device emulation.

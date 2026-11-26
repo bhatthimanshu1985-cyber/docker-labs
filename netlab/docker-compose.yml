@@ -13,6 +13,7 @@ services:
       - "8442:8442"   # Cisco router
       - "8443:8443"   # Cisco switch
       - "8444:8444"   # generic switch
+      - "8445:8445"   # FortiGate over HTTPS (self-signed) - use this for PRTG FortiGate sensors
     environment:
       TLS: "0"                 # set to 1 for HTTPS (self-signed cert)
       FGT_TOKEN: "fgt-test-token"

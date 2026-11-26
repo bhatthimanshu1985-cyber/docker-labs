@@ -6,4 +6,6 @@ DEVICE=fortigate     uvicorn app:app --host 0.0.0.0 --port 8441 $SSL &
 DEVICE=cisco-router  uvicorn app:app --host 0.0.0.0 --port 8442 $SSL &
 DEVICE=cisco-switch  uvicorn app:app --host 0.0.0.0 --port 8443 $SSL &
 DEVICE=switch        uvicorn app:app --host 0.0.0.0 --port 8444 $SSL &
+# HTTPS twin of the FortiGate (self-signed) for PRTG built-in FortiGate sensors, which require TLS
+DEVICE=fortigate     uvicorn app:app --host 0.0.0.0 --port 8445 --ssl-keyfile /srv/key.pem --ssl-certfile /srv/cert.pem &
 wait
