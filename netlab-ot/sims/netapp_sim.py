@@ -68,7 +68,10 @@ def aggr_rec(a):
     return {"uuid": U(a), "name": a, "node": {"name": node, "uuid": U(node)}, "state": "online" if node_state(node) == "up" else "offline",
             "home_node": {"name": node}, "space": {"block_storage": {"size": int(size), "available": int(size - used), "used": int(used),
             "full_threshold_percent": 98}, "efficiency": {"savings": int(used * .2), "ratio": 1.25}},
-            "data_encryption": {"software_encryption_enabled": False}, "snaplock_type": "non_snaplock"}
+            "data_encryption": {"software_encryption_enabled": False}, "snaplock_type": "non_snaplock",
+            "block_storage": {"primary": {"disk_count": 8 if a.startswith("aggr0") else 20, "raid_type": "raid_dp", "disk_class": "solid_state", "raid_size": 24},
+                              "storage_type": "ssd", "mirror": {"enabled": False}},
+            "inode_attributes": {"files_total": 10 ** 7, "files_used": 120000, "max_files_available": 10 ** 7, "max_files_possible": 2 * 10 ** 9}}
 
 
 def raw(v, k):
@@ -84,7 +87,10 @@ def vol_rec(v, want_metrics=False, want_stats=False):
     r = {"uuid": U(v), "name": v, "svm": {"name": svm, "uuid": U(svm)}, "state": vol_state(v), "type": "rw", "style": "flexvol",
          "aggregates": [{"name": ag, "uuid": U(ag)}], "nas": {"path": f"/{v}"},
          "space": {"size": int(size), "available": int(size - used), "used": int(used), "snapshot": {"used": int(used * .05), "reserve_percent": 5},
-                   "percent_used": round(used * 100 / size, 1)}, "snapmirror": {"is_protected": v in ("vol_data01", "vol_db01")}}
+                   "percent_used": round(used * 100 / size, 1)}, "snapmirror": {"is_protected": v in ("vol_data01", "vol_db01")},
+         "files": {"maximum": int(size / 4096), "used": int(used / 65536) + 96},
+         "autosize": {"mode": "off", "maximum": int(size * 1.2), "minimum": int(size), "grow_threshold": 85, "shrink_threshold": 50},
+         "snapshot_policy": {"name": "default"}, "language": "c.utf_8", "create_time": "2025-03-14T09:12:44+00:00"}
     if want_metrics:
         lat = 400 + (int(lab.fault("high_latency", v) or 0) * 1000 if lab.fault("high_latency", v) else 0) + int(wave(0, 80, .3))
         iops = int(wave(1800, 600, .05)) if r["state"] == "online" else 0
