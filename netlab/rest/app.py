@@ -143,8 +143,9 @@ def fgt_usage(request: Request):
          "mem": [{"current": round(SIM.mem(DEVICE, t)), "historical": hist(lambda x: round(SIM.mem(DEVICE, x)))}],
          "disk": [{"current": round(26 + 0.02 * uptime_s() / 86400), "historical": hist(lambda x: round(26 + 0.02 * uptime_s() / 86400))}],
          "session": [{"current": SIM.sessions(DEVICE, t), "historical": hist(lambda x: SIM.sessions(DEVICE, x))}],
-         "setup_rate": [{"current": SIM.session_rate(DEVICE, t), "historical": hist(lambda x: SIM.session_rate(DEVICE, x))}]}
-    for k in ("session6", "setup_rate6", "npu_session", "faz_log_rate", "fds_log_rate", "disk_lograte", "ses_rate"):
+         "setuprate": [{"current": SIM.session_rate(DEVICE, t), "historical": hist(lambda x: SIM.session_rate(DEVICE, x))}]}
+    r["setup_rate"] = r["setuprate"]   # alias used by earlier lab versions
+    for k in ("session6", "setuprate6", "setup_rate6", "npu_session", "disk_lograte", "faz_lograte", "fds_lograte", "faz_log_rate", "fds_log_rate"):
         r[k] = [{"current": 0, "historical": hist(lambda x: 0)}]
     res = request.query_params.get("resource")
     if res:
