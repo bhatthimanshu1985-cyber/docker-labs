@@ -120,7 +120,12 @@ def fgt_vdom():
 def fgt_webui(scope: str = "global"):
     now = int(time.time() * 1000)
     return fgt({"snapshot_utc_time": now, "utc_last_reboot": now - uptime_s() * 1000, "time_zone_offset": time.timezone // -60,
-                "forticare_registered": False, "model_name": "FortiGate", "model_number": "60F", "hostname": "FGT-LAB-01"}, path="web-ui", name="state")
+                "forticare_registered": False, "model_name": "FortiGate", "model_number": "60F", "hostname": "FGT-LAB-01",
+                "cpu": round(SIM.cpu(DEVICE)), "mem": round(SIM.mem(DEVICE)), "memory": round(SIM.mem(DEVICE)),
+                "disk": round(26 + 0.02 * uptime_s() / 86400), "session": SIM.sessions(DEVICE), "sessions": SIM.sessions(DEVICE),
+                "setup_rate": SIM.session_rate(DEVICE),
+                # 0 = normal; >0 when memory pressure is high (memory-leak scenario)
+                "conserve_mode": 1 if SIM.mem(DEVICE) > 88 else 0, "conserve_mode_status": "off" if SIM.mem(DEVICE) <= 88 else "on"}, path="web-ui", name="state")
 
 
 @app.get("/api/v2/monitor/system/firmware")
