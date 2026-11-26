@@ -202,6 +202,7 @@ def node_rec(i, n):
                            "failed_fan": {"count": 0, "message": {"message": "There are no failed fans.", "code": "0"}},
                            "failed_power_supply": {"count": 0, "message": {"message": "There are no failed power supplies.", "code": "0"}},
                            "frus": [{"id": "1", "type": "psu", "state": "ok"}, {"id": "2", "type": "psu", "state": "ok"}, {"id": "1", "type": "fan", "state": "ok"}]},
+            "storage_configuration": "multi_path_ha", "service_processor": {"state": "online", "link_status": "up", "firmware_version": "3.10"},
             "nvram": {"battery_state": "battery_ok", "id": 8044651237 + i}, "system_id": "05" + str(i) * 8, "metrocluster": {"type": "none"}, "location": "Lab Rack C", "membership": "member", "is_spares_low": False}
 
 
@@ -255,16 +256,18 @@ def _split(rows, tname="volume:node"):
 
 
 def _proto(v, ops):
-    """per-protocol volume counters (cifs/nfs/fcp/iscsi) as ONTAP exposes them"""
+    """per-protocol volume counters (cifs/nfs/fcp/iscsi). ONTAP REST names them 'cifs.read_ops' (dotted); classic names kept too."""
     svm = VOLS[v][0]
     share = {"cifs": 1.0 if svm == "svm_cifs" else 0.0, "nfs": 0.0 if svm == "svm_cifs" else 1.0, "fcp": 0.0, "iscsi": 0.0}
     if v == "vol_vmware_ds1": share.update({"nfs": 0.6, "iscsi": 0.4})
     out = []
     for p, f in share.items():
         o = ops * f
-        out += [_ctr(f"{p}_read_ops", o * .7), _ctr(f"{p}_write_ops", o * .3), _ctr(f"{p}_other_ops", o * .02), _ctr(f"{p}_total_ops", o * 1.02),
-                _ctr(f"{p}_read_data", o * .7 * 8192), _ctr(f"{p}_write_data", o * .3 * 4096), _ctr(f"{p}_other_data", 0),
-                _ctr(f"{p}_read_latency", o * .7 * 400), _ctr(f"{p}_write_latency", o * .3 * 560), _ctr(f"{p}_other_latency", o * 10)]
+        vals = {"read_ops": o * .7, "write_ops": o * .3, "other_ops": o * .02, "total_ops": o * 1.02,
+                "read_data": o * .7 * 8192, "write_data": o * .3 * 4096, "other_data": 0,
+                "read_latency": o * .7 * 400, "write_latency": o * .3 * 560, "other_latency": o * 10}
+        for k, x in vals.items():
+            out += [_ctr(f"{p}.{k}", x), _ctr(f"{p}_{k}", x)]
     return out
 
 
@@ -280,7 +283,8 @@ def _volume_rows():
             _ctr("read_data", ops * .7 * 8192), _ctr("write_data", ops * .3 * 4096), _ctr("other_data", 0),
             _ctr("read_latency", ops * .7 * 400), _ctr("write_latency", ops * .3 * 560), _ctr("other_latency", e * 600),
             _ctr("total_data", ops * 6963), _ctr("avg_latency", ops * 440),
-            _ctr("bytes_read", ops * .7 * 8192), _ctr("bytes_written", ops * .3 * 4096)] + _proto(v, ops) +
+            _ctr("bytes_read", ops * .7 * 8192), _ctr("bytes_written", ops * .3 * 4096),
+            _ctr("total_read_ops", ops * .7), _ctr("total_write_ops", ops * .3), _ctr("total_other_ops", e * 3)] + _proto(v, ops) +
             [{"name": "node.name", "value": node}]})
     return rows
 
