@@ -228,8 +228,17 @@ def sm(request: Request): return recs(snapmirror(), request)
 
 @app.get("/api/storage/luns")
 def luns(request: Request):
-    return recs([{"name": "/vol/vol_vmware_ds1/lun0", "uuid": U("lun0"), "svm": {"name": "svm_nfs"}, "status": {"state": "offline" if lab.fault("volume_offline", "vol_vmware_ds1") else "online"},
-                  "space": {"size": 2 * TB, "used": int(1.2 * TB)}}], request)
+    off = bool(lab.fault("volume_offline", "vol_vmware_ds1"))
+    node = NODES[0]
+    r = {"name": "/vol/vol_vmware_ds1/lun0", "uuid": U("lun0"), "svm": {"name": "svm_nfs", "uuid": U("svm_nfs")}, "class": "regular",
+         "os_type": "vmware", "serial_number": "wSAbc+Lab0001", "enabled": not off, "comment": "lab vmware datastore lun",
+         "create_time": "2025-03-14T09:12:44+00:00",
+         "location": {"logical_unit": "lun0", "node": {"name": node, "uuid": U(node)}, "volume": {"name": "vol_vmware_ds1", "uuid": U("vol_vmware_ds1")}},
+         "status": {"state": "offline" if off else "online", "mapped": True, "container_state": "online", "read_only": False},
+         "space": {"size": 2 * TB, "used": int(1.2 * TB), "guarantee": {"requested": False, "reserved": False}},
+         "lun_maps": [{"igroup": {"name": "ig_esx", "uuid": U("ig_esx")}, "logical_unit_number": 0}],
+         "statistics": raw("vol_vmware_ds1", 0 if off else 900)}
+    return recs([r], request)
 
 
 @app.get("/api/support/ems/events")
