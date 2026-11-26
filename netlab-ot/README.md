@@ -10,7 +10,7 @@ Purpose: reproduce a customer's problem, show exactly what happened on the wire/
 | Mosquitto 2 | 1883 (MQTT), 8883 (TLS, lab CA), 9001 (WebSocket) | Real broker, auth on (lab/labpass, device/devpass), log_type all |
 | mqtt-sim | 9101 control | 3 devices (plc-01 QoS1, sensor-02 QoS0, gateway-03 QoS2 JSON), Last Will + retained status, "tap" logger of every message |
 | modbus-sim | 502 (TCP), 9102 control | Own Modbus TCP server. Unit 1 PLC, unit 2 energy meter (float32), unit 3 VFD. FC 1-6, 15, 16 |
-| netapp-sim | 8080 HTTP, 443 HTTPS (self-signed) | ONTAP 9.12 REST (/api/...) + ZAPI (/servlets/netapp.servlets.admin.XMLrequest_filer). admin/netapp123 |
+| netapp-sim | 8081 HTTP (container 8080), 443 HTTPS (self-signed) | ONTAP 9.12 REST (/api/...) + ZAPI (/servlets/netapp.servlets.admin.XMLrequest_filer). admin/netapp123 |
 
 PRTG sensor settings for every simulator: see docs/PRTG_SETUP.md
 
@@ -40,5 +40,5 @@ Generic API: GET /_lab/state, /_lab/log; POST /_lab/fault {"name","target","valu
 
 ## Point your monitoring tool at it
 Use the Docker host IP. Modbus: port 502, unit 1/2/3 (PLC regs: 0 temp x10, 1 pressure x100, 2 setpoint (writable), 3 rpm, 4-5 counter32, 6 status; coils 0-2; meter floats: V, I, kW, Hz, kWh at regs 0,2,4,6,8).
-NetApp: HTTPS 443 or HTTP 8080, basic auth. MQTT: 1883, user lab/labpass, topics factory/#, factory/<device>/status (retained online/offline).
+NetApp: HTTPS 443 or HTTP 8081, basic auth. MQTT: 1883, user lab/labpass, topics factory/#, factory/<device>/status (retained online/offline).
 The /_lab control API is unauthenticated: keep this lab on a trusted network.
