@@ -91,10 +91,12 @@ def fgt(results, **extra):
 
 
 def hist(fn, windows=((60, "1-min"), (600, "10-min"), (1800, "30-min"))):
+    """FortiOS history: {"1-min": {"values": [[ts, v], ...], "min", "max", "average"}} - newest sample first"""
     now, out = time.time(), {}
     for w, label in windows:
-        xs = [fn(now - w * i / 8) for i in range(8)]
-        out[label] = {"min": min(xs), "max": max(xs), "average": round(sum(xs) / len(xs))}
+        pts = [[int(now - w * i / 10), fn(now - w * i / 10)] for i in range(10)]
+        vals = [p[1] for p in pts]
+        out[label] = {"values": pts, "min": min(vals), "max": max(vals), "average": round(sum(vals) / len(vals))}
     return out
 
 
