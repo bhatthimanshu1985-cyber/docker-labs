@@ -299,7 +299,7 @@ class Sim:
             on, st, en = self._sched_hit([w], t)
             if on:
                 f *= w.get("factor", 5) * min(1, (t - st) / 30, (en - t) / 30 + 0.2)
-        r = base * max(0.0, f)
+        r = base / 8.0 * max(0.0, f)          # config *_bps are bits/s, counters are bytes
         speed = ic.get("speed", 1_000_000_000) / 8
         return min(r, speed * 0.97) if speed else r
 
@@ -334,7 +334,7 @@ class Sim:
             # counters start where a device that has been up since `boot` would be: average rate * elapsed (bounded)
             el = max(0.0, min(t - boot, 400 * 86400))
             seed = lambda k: _h(self.seed(), dev, name, "init", k)
-            avg_in, avg_out = ic.get("in_bps", 0) * 0.35, ic.get("out_bps", 0) * 0.35
+            avg_in, avg_out = ic.get("in_bps", 0) / 8 * 0.35, ic.get("out_bps", 0) / 8 * 0.35
             st = {"boot": boot, "t": t, "in": avg_in * el, "out": avg_out * el, "inerr": 0.0, "outerr": 0.0,
                   "indisc": 0.0, "outdisc": 0.0, "inmc": avg_in * el * 0.002 / 90, "outmc": avg_out * el * 0.0005 / 90}
             if ic.get("in_bps", 0) == 0: st["in"] = st["out"] = 0.0

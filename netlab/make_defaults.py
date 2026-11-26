@@ -24,7 +24,7 @@ rt_if = {
 sw_if = {f"GigabitEthernet1/0/{n}": ifc("", 6, G, 300_000 + n * 70_000, 200_000 + n * 40_000, "office",
                                          flaps_per_day=0.3 if n % 4 == 0 else 0, errors_per_hour=0.1 + (n % 3) * 0.4,
                                          **({"status": "down"} if n in (5, 9) else {})) for n in range(1, 13)}
-sw_if["GigabitEthernet1/1/1"] = ifc("", 6, G, 6_000_000, 8_000_000, "server", bursts_per_hour=10)
+sw_if["GigabitEthernet1/1/1"] = ifc("", 6, G, 2_500_000, 3_000_000, "server", bursts_per_hour=10)
 sw_if["Vlan1"] = ifc("", 53, G, 50_000, 40_000, "office")
 gs_if = {f"port{n}": ifc("", 6, G, 200_000 + n * 50_000, 150_000 + n * 30_000, "office", **({"status": "down"} if n == 4 else {})) for n in range(1, 9)}
 
@@ -36,7 +36,7 @@ cfg = {
     "devices": {
         "fortigate": {
             "kind": "fortigate", "descr": "FortiGate-60F v7.2.5,build1517,230731 (GA.M)", "objid": "1.3.6.1.4.1.12356.101.1.6006",
-            "sysname": "FGT-LAB-01", "location": "Lab Rack A / U14", "boot": "2026-09-14T03:12:00", "reboot_downtime_s": 150,
+            "sysname": "FGT-LAB-01", "location": "Lab Rack A / U14", "boot": "2026-11-12T03:12:00", "reboot_downtime_s": 150,
             "load_profile": "office",
             "cpu": {"base": 8, "load_amp": 20, "noise": 3, "spike_per_hour": 2, "spike_amp": 30},
             "mem": {"base": 44, "load_amp": 6, "drift_per_day": 0.06, "leak_reset_days": 0, "noise": 0.8},
@@ -49,21 +49,21 @@ cfg = {
             "ssl_vpn": {"users_max": 8}},
         "cisco-router": {
             "kind": "cisco", "descr": "Cisco IOS XE Software, Version 17.06.03, ISR4331/K9 (X86), RELEASE SOFTWARE (fc4)", "objid": "1.3.6.1.4.1.9.1.2279",
-            "sysname": "RTR-LAB-01", "location": "Lab Rack A / U12", "boot": "2026-08-20T02:40:00", "reboot_downtime_s": 240,
+            "sysname": "RTR-LAB-01", "location": "Lab Rack A / U12", "boot": "2026-11-05T02:40:00", "reboot_downtime_s": 240,
             "cpu": {"base": 6, "load_amp": 9, "noise": 2, "spike_per_hour": 1.5, "spike_amp": 25},
             "mem": {"base": 30, "load_amp": 3, "drift_per_day": 0.03, "noise": 0.4},
             "temp": {"base": 40, "cpu_coupling": 0.08},
             "network": {"loss_pct": 0, "latency_ms": [3, 25]}, "interfaces": rt_if},
         "cisco-switch": {
             "kind": "cisco", "descr": "Cisco IOS Software [Cupertino], Catalyst L3 Switch Software (CAT9K_LITE_IOSXE), Version 17.9.4, C9200L-24T-4G", "objid": "1.3.6.1.4.1.9.1.2530",
-            "sysname": "SW-LAB-01", "location": "Lab Rack A / U10", "boot": "2026-07-02T01:10:00", "reboot_downtime_s": 300,
+            "sysname": "SW-LAB-01", "location": "Lab Rack A / U10", "boot": "2026-11-10T01:10:00", "reboot_downtime_s": 300,
             "cpu": {"base": 4, "load_amp": 7, "noise": 1.5, "spike_per_hour": 1, "spike_amp": 18},
             "mem": {"base": 28, "load_amp": 2, "drift_per_day": 0.02, "noise": 0.3},
             "temp": {"base": 35, "cpu_coupling": 0.06},
             "network": {"loss_pct": 0, "latency_ms": [2, 18]}, "interfaces": sw_if},
         "switch": {
             "kind": "generic", "descr": "Generic 24-port Gigabit Managed Switch, firmware 2.1.7", "objid": "1.3.6.1.4.1.8072.3.2.10",
-            "sysname": "SW-ACCESS-02", "location": "Lab Rack B / U5", "boot": "2026-05-11T04:00:00",
+            "sysname": "SW-ACCESS-02", "location": "Lab Rack B / U5", "boot": "2026-10-29T04:00:00",
             "cpu": {"base": 5, "load_amp": 5, "noise": 1}, "mem": {"base": 35, "load_amp": 1, "noise": 0.3},
             "temp": {"base": 41, "cpu_coupling": 0.05},
             "network": {"loss_pct": 0, "latency_ms": [4, 30]}, "interfaces": gs_if},
