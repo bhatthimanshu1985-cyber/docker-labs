@@ -202,7 +202,7 @@ def node_rec(i, n):
                            "failed_fan": {"count": 0, "message": {"message": "There are no failed fans.", "code": "0"}},
                            "failed_power_supply": {"count": 0, "message": {"message": "There are no failed power supplies.", "code": "0"}},
                            "frus": [{"id": "1", "type": "psu", "state": "ok"}, {"id": "2", "type": "psu", "state": "ok"}, {"id": "1", "type": "fan", "state": "ok"}]},
-            "metrocluster": {"type": "none"}, "location": "Lab Rack C", "membership": "member", "is_spares_low": False}
+            "nvram": {"battery_state": "battery_ok", "id": 8044651237 + i}, "system_id": "05" + str(i) * 8, "metrocluster": {"type": "none"}, "location": "Lab Rack C", "membership": "member", "is_spares_low": False}
 
 
 @app.get("/api/cluster/nodes")
@@ -268,29 +268,47 @@ def _proto(v, ops):
     return out
 
 
-def counter_rows(table):
-    """ONTAP counter-manager rows (cumulative raw counters, like real ONTAP)."""
+def _volume_rows():
     e = time.time() - T0 + 1_000_000
     rows = []
-    if table.startswith("volume"):
-        for v in VOLS:
-            k = 1800 if vol_state(v) == "online" else 0
-            ops = int(e * k)
-            rows.append({"id": f"{VOLS[v][0]}:{v}", "properties": [
-                _ctr("total_ops", ops), _ctr("read_ops", ops * .7), _ctr("write_ops", ops * .3), _ctr("other_ops", e * 3),
-                _ctr("read_data", ops * .7 * 8192), _ctr("write_data", ops * .3 * 4096), _ctr("other_data", 0),
-                _ctr("read_latency", ops * .7 * 400), _ctr("write_latency", ops * .3 * 560), _ctr("other_latency", e * 600),
-                _ctr("total_data", ops * 6963), _ctr("avg_latency", ops * 440),
-                _ctr("bytes_read", ops * .7 * 8192), _ctr("bytes_written", ops * .3 * 4096)]
-                + _proto(v, ops) +
-                [{"name": "node.name", "value": NODES[0 if VOLS[v][1].endswith("n1") else 1]}]})
-    else:
+    for v in VOLS:
+        k = 1800 if vol_state(v) == "online" else 0
+        ops = int(e * k)
+        node = NODES[0 if VOLS[v][1].endswith("n1") else 1]
+        rows.append({"id": f"{VOLS[v][0]}:{v}", "node": node, "properties": [
+            _ctr("total_ops", ops), _ctr("read_ops", ops * .7), _ctr("write_ops", ops * .3), _ctr("other_ops", e * 3),
+            _ctr("read_data", ops * .7 * 8192), _ctr("write_data", ops * .3 * 4096), _ctr("other_data", 0),
+            _ctr("read_latency", ops * .7 * 400), _ctr("write_latency", ops * .3 * 560), _ctr("other_latency", e * 600),
+            _ctr("total_data", ops * 6963), _ctr("avg_latency", ops * 440),
+            _ctr("bytes_read", ops * .7 * 8192), _ctr("bytes_written", ops * .3 * 4096)] + _proto(v, ops) +
+            [{"name": "node.name", "value": node}]})
+    return rows
+
+
+def counter_rows(table):
+    """ONTAP counter-manager rows (cumulative raw counters, like real ONTAP).
+    volume:node has ONE row per node (id = node name) summing that node's volumes."""
+    if table == "volume:node":
+        per = _volume_rows()
+        rows = []
         for n in NODES:
-            ops = int(e * 2500)
-            rows.append({"id": n, "properties": [_ctr("total_ops", ops), _ctr("read_ops", ops * .6), _ctr("write_ops", ops * .4),
-                                                 _ctr("read_data", ops * .6 * 8192), _ctr("write_data", ops * .4 * 4096),
-                                                 _ctr("cpu_busy", e * 350000), _ctr("cpu_elapsed_time", e * 1000000),
-                                                 {"name": "node.name", "value": n}]})
+            tot = {}
+            for r in per:
+                if r["node"] != n: continue
+                for c in r["properties"]:
+                    if isinstance(c["value"], int) and c["name"] != "node.name": tot[c["name"]] = tot.get(c["name"], 0) + c["value"]
+            rows.append({"id": n, "properties": [_ctr(k, v) for k, v in tot.items()] + [{"name": "node.name", "value": n}]})
+        return rows
+    if table == "volume":
+        return [{"id": r["id"], "properties": r["properties"]} for r in _volume_rows()]
+    e = time.time() - T0 + 1_000_000
+    rows = []
+    for n in NODES:
+        ops = int(e * 2500)
+        rows.append({"id": n, "properties": [_ctr("total_ops", ops), _ctr("read_ops", ops * .6), _ctr("write_ops", ops * .4),
+                                             _ctr("read_data", ops * .6 * 8192), _ctr("write_data", ops * .4 * 4096),
+                                             _ctr("cpu_busy", e * 350000), _ctr("cpu_elapsed_time", e * 1000000),
+                                             {"name": "node.name", "value": n}]})
     return rows
 
 
