@@ -204,6 +204,63 @@ def vol(vid: str, request: Request):
     return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "uuid"}}, 404)
 
 
+@app.get("/api/storage/aggregates/{aid}")
+def aggr(aid: str):
+    for a in AGGRS:
+        if U(a) == aid: return aggr_rec(a)
+    return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "uuid"}}, 404)
+
+
+def _ctr(name, val): return {"name": name, "value": int(val)}
+
+
+def counter_rows(table):
+    """ONTAP counter-manager rows (cumulative raw counters, like real ONTAP)."""
+    e = time.time() - T0 + 1_000_000
+    rows = []
+    if table.startswith("volume"):
+        for v in VOLS:
+            k = 1800 if vol_state(v) == "online" else 0
+            ops = int(e * k)
+            rows.append({"id": f"{VOLS[v][0]}:{v}", "properties": [
+                _ctr("total_ops", ops), _ctr("read_ops", ops * .7), _ctr("write_ops", ops * .3), _ctr("other_ops", e * 3),
+                _ctr("read_data", ops * .7 * 8192), _ctr("write_data", ops * .3 * 4096), _ctr("other_data", 0),
+                _ctr("read_latency", ops * .7 * 400), _ctr("write_latency", ops * .3 * 560), _ctr("other_latency", e * 600),
+                _ctr("total_data", ops * 6963), _ctr("avg_latency", ops * 440),
+                {"name": "node.name", "value": NODES[0 if VOLS[v][1].endswith("n1") else 1]}]})
+    else:
+        for n in NODES:
+            ops = int(e * 2500)
+            rows.append({"id": n, "properties": [_ctr("total_ops", ops), _ctr("read_ops", ops * .6), _ctr("write_ops", ops * .4),
+                                                 _ctr("read_data", ops * .6 * 8192), _ctr("write_data", ops * .4 * 4096),
+                                                 _ctr("cpu_busy", e * 350000), _ctr("cpu_elapsed_time", e * 1000000),
+                                                 {"name": "node.name", "value": n}]})
+    return rows
+
+
+@app.get("/api/cluster/counter/tables")
+def counter_tables(request: Request):
+    return recs([{"name": t, "description": f"{t} counters", "_links": {"self": {"href": f"/api/cluster/counter/tables/{t}"}}}
+                 for t in ("volume", "volume:node", "system:node", "disk", "lun")], request)
+
+
+@app.get("/api/cluster/counter/tables/{table}")
+def counter_table(table: str):
+    return {"name": table, "description": f"{table} counters", "counter_schemas": [], "_links": {"self": {"href": f"/api/cluster/counter/tables/{table}"}}}
+
+
+@app.get("/api/cluster/counter/tables/{table}/rows")
+def counter_rows_ep(table: str, request: Request):
+    return recs(counter_rows(table), request)
+
+
+@app.get("/api/cluster/counter/tables/{table}/rows/{rid}")
+def counter_row(table: str, rid: str):
+    for r in counter_rows(table):
+        if r["id"] == rid: return r
+    return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "id"}}, 404)
+
+
 @app.get("/api/storage/disks")
 def disks(request: Request): return recs([disk_rec(d) for d in DISKS], request)
 
