@@ -220,6 +220,16 @@ def aggr(aid: str):
 def _ctr(name, val): return {"name": name, "value": int(val)}
 
 
+def _split(rows):
+    """Real ONTAP: counters under 'counters', node.name etc. under 'properties'."""
+    out = []
+    for r in rows:
+        props = [p for p in r["properties"] if not isinstance(p["value"], int) or p["name"].endswith(".name")]
+        ctrs = [p for p in r["properties"] if p not in props]
+        out.append({"id": r["id"], "properties": props, "counters": ctrs})
+    return out
+
+
 def counter_rows(table):
     """ONTAP counter-manager rows (cumulative raw counters, like real ONTAP)."""
     e = time.time() - T0 + 1_000_000
@@ -228,7 +238,7 @@ def counter_rows(table):
         for v in VOLS:
             k = 1800 if vol_state(v) == "online" else 0
             ops = int(e * k)
-            rows.append({"id": f"{VOLS[v][0]}:{v}", "properties": [
+            rows.append({"id": f"{v}:{NODES[0 if VOLS[v][1].endswith('n1') else 1]}", "properties": [
                 _ctr("total_ops", ops), _ctr("read_ops", ops * .7), _ctr("write_ops", ops * .3), _ctr("other_ops", e * 3),
                 _ctr("read_data", ops * .7 * 8192), _ctr("write_data", ops * .3 * 4096), _ctr("other_data", 0),
                 _ctr("read_latency", ops * .7 * 400), _ctr("write_latency", ops * .3 * 560), _ctr("other_latency", e * 600),
@@ -257,14 +267,32 @@ def counter_table(table: str):
 
 @app.get("/api/cluster/counter/tables/{table}/rows")
 def counter_rows_ep(table: str, request: Request):
-    return recs(counter_rows(table), request)
+    return recs(_split(counter_rows(table)), request)
 
 
 @app.get("/api/cluster/counter/tables/{table}/rows/{rid}")
 def counter_row(table: str, rid: str):
-    for r in counter_rows(table):
+    for r in _split(counter_rows(table)):
         if r["id"] == rid: return r
     return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "id"}}, 404)
+
+
+@app.get("/api/storage/volumes/{vid}/snapshots")
+def vol_snaps(vid: str, request: Request):
+    for v in VOLS:
+        if U(v) == vid:
+            h = int(hrs())
+            snaps = [{"uuid": U(f"{v}snap{i}"), "name": f"hourly.{i}", "create_time": datetime.fromtimestamp(time.time() - (i + 1) * 3600, timezone.utc).isoformat(timespec="seconds")}
+                     for i in range(6)]
+            return recs(snaps, request)
+    return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "uuid"}}, 404)
+
+
+@app.get("/api/storage/luns/{lid}")
+def lun_one(lid: str, request: Request):
+    r = luns(request)["records"][0]
+    if r["uuid"] == lid: return r
+    return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "uuid"}}, 404)
 
 
 @app.get("/api/storage/disks")
