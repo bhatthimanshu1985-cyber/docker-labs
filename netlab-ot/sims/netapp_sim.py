@@ -110,7 +110,10 @@ def disk_rec(d):
             "home_node": {"name": n, "uuid": U(n)}, "bay": int(d.split(".")[2]) % 12, "shelf": {"uid": U("shelf" + n), "name": "1.0", "bay": int(d.split(".")[2]) % 12},
             "pool": "pool0", "class": "solid_state", "vendor": "NETAPP", "firmware_version": "NA51", "rpm": 0, "rated_life_used_percent": 3,
             "aggregates": [] if broken else [{"name": "aggr0_n1" if int(d.split(".")[2]) < 4 else ("aggr1_n1" if int(d.split(".")[2]) < 12 else "aggr1_n2"), "uuid": U("aggr")}],
-            **({"outage": {"reason": "failed"}} if broken else {}),
+            "outage": {"persistently_failed": bool(broken), "reason": "failed" if broken else "none"},
+            "stats": {"throughput": int(wave(4e6, 1e6, .1)) if not broken else 0, "iops_total": int(wave(90, 30, .1)) if not broken else 0,
+                      "average_latency": int(wave(350, 60, .2)), "path_error_count": 0, "power_on_hours": 5120},
+            "error": [{"type": "missing", "message": "disk missing"}] if broken else [],
             "self_encrypting": False, "fips_certified": False, "local": True}
 
 
@@ -243,7 +246,7 @@ def counter_rows(table):
         for v in VOLS:
             k = 1800 if vol_state(v) == "online" else 0
             ops = int(e * k)
-            rows.append({"id": f"{v}:{NODES[0 if VOLS[v][1].endswith('n1') else 1]}", "properties": [
+            rows.append({"id": f"{VOLS[v][0]}:{v}", "properties": [
                 _ctr("total_ops", ops), _ctr("read_ops", ops * .7), _ctr("write_ops", ops * .3), _ctr("other_ops", e * 3),
                 _ctr("read_data", ops * .7 * 8192), _ctr("write_data", ops * .3 * 4096), _ctr("other_data", 0),
                 _ctr("read_latency", ops * .7 * 400), _ctr("write_latency", ops * .3 * 560), _ctr("other_latency", e * 600),
@@ -298,6 +301,12 @@ def lun_one(lid: str, request: Request):
     r = luns(request)["records"][0]
     if r["uuid"] == lid: return r
     return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "uuid"}}, 404)
+
+
+@app.get("/api/storage/disks/{dname}")
+def disk_one(dname: str):
+    if dname in DISKS: return disk_rec(dname)
+    return JSONResponse({"error": {"message": "entry doesn't exist", "code": "4", "target": "name"}}, 404)
 
 
 @app.get("/api/storage/disks")
