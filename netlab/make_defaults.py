@@ -32,7 +32,7 @@ cfg = {
     "_readme": "Edit and save: values are hot-reloaded within ~2 s (no restart). Structure changes (adding/removing interfaces, device descr) need: docker compose up -d --build. active_scenarios lists named scenarios (see 'scenarios') that are merged on top.",
     "timezone": "Europe/Berlin",
     "seed": 42,
-    "active_scenarios": [],
+    "active_scenarios": ["vpn_branch_up"],
     "devices": {
         "fortigate": {
             "kind": "fortigate", "descr": "FortiGate-60F v7.2.5,build1517,230731 (GA.M)", "objid": "1.3.6.1.4.1.12356.101.1.6006",
