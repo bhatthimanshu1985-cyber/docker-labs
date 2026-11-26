@@ -116,6 +116,13 @@ def fgt_vdom():
     return fgt([{"name": "root", "short-name": "root", "q_origin_key": "root", "flag": 0, "temporary": 0}], path="system", name="vdom")
 
 
+@app.get("/api/v2/monitor/web-ui/state")
+def fgt_webui(scope: str = "global"):
+    now = int(time.time() * 1000)
+    return fgt({"snapshot_utc_time": now, "utc_last_reboot": now - uptime_s() * 1000, "time_zone_offset": time.timezone // -60,
+                "forticare_registered": False, "model_name": "FortiGate", "model_number": "60F", "hostname": "FGT-LAB-01"}, path="web-ui", name="state")
+
+
 @app.get("/api/v2/monitor/system/firmware")
 def fgt_fw():
     return fgt({"current": {"platform-id": "FGT60F", "major": 7, "minor": 2, "patch": 5, "build": 1517, "version": "v7.2.5", "release-type": "GA"}})
@@ -270,3 +277,10 @@ def prtg():
     res.append({"channel": "Uptime", "value": uptime_s(), "unit": "TimeSeconds"})
     res.append({"channel": "Errors total", "value": sum(i["rxe"] + i["txe"] for i in ifs), "mode": "Difference"})
     return {"prtg": {"result": res, "text": f"{DEVICE} simulated"}}
+
+
+# FortiOS documents most monitor endpoints with a trailing /select; accept both forms
+from fastapi.routing import APIRoute
+for _r in list(app.routes):
+    if isinstance(_r, APIRoute) and _r.path.startswith("/api/v2/monitor/") and not _r.path.endswith("/select"):
+        app.add_api_route(_r.path + "/select", _r.endpoint, methods=["GET"])
