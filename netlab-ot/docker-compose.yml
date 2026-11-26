@@ -1,0 +1,46 @@
+services:
+  mosquitto:
+    build: ./mosquitto
+    ports: ["1883:1883", "8883:8883", "9001:9001"]   # MQTT, MQTT/TLS (self-signed CA), WebSockets
+    environment:
+      MQTT_LAB_PASS: labpass          # user "lab"
+      MQTT_DEVICE_PASS: devpass       # user "device"
+      MQTT_ALLOW_ANON: "false"
+    volumes: ["mosquitto-data:/mosquitto/data"]
+    restart: unless-stopped
+
+  mqtt-sim:
+    build: ./sims
+    command: python mqtt_sim.py
+    depends_on: [mosquitto]
+    ports: ["9101:9101"]              # control API
+    environment: { MQTT_HOST: mosquitto, MQTT_USER: lab, MQTT_PASS: labpass }
+    volumes: ["./logs:/logs"]
+    restart: unless-stopped
+
+  modbus-sim:
+    build: ./sims
+    command: python modbus_sim.py
+    ports: ["502:502", "9102:9102"]   # Modbus TCP, control API
+    volumes: ["./logs:/logs"]
+    restart: unless-stopped
+
+  netapp-sim:
+    build: ./sims
+    command: python netapp_sim.py
+    ports: ["8080:8080", "443:443"]   # ONTAP REST/ZAPI over HTTP and HTTPS (+ /_lab control API)
+    environment: { ONTAP_USER: admin, ONTAP_PASS: netapp123 }
+    volumes: ["./logs:/logs"]
+    restart: unless-stopped
+
+  # Optional packet capture:  docker compose --profile capture up capture   -> logs/capture.pcap (open in Wireshark)
+  capture:
+    profiles: ["capture"]
+    image: nicolaka/netshoot
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    command: tcpdump -i any -U -w /logs/capture.pcap "port 1883 or port 8883 or port 502 or port 443 or port 8080"
+    volumes: ["./logs:/logs"]
+
+volumes:
+  mosquitto-data:

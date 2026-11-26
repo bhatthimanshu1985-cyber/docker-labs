@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""labctl: control the OT lab (faults, scenarios, logs, support bundle).  Env LAB_HOST (default localhost)."""
+import argparse, glob, json, os, subprocess, sys, tarfile, time, urllib.request, base64
+
+HOST = os.getenv("LAB_HOST", "localhost")
+SIMS = {"mqtt": 9101, "modbus": 9102, "netapp": 8080}
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+SCENARIOS = {
+ "modbus-float-wordswap": ("Energy meter floats decode as garbage (device sends CDAB; PRTG default is AB CD). PRTG/Modbus client shows absurd values.", [("modbus", "fault", "word_swap", None, None)]),
+ "modbus-byteorder-badc": ("Meter floats byte-swapped within words (PRTG Byte Order 'Big-endian byte swap (BA DC)' needed).", [("modbus", "fault", "byte_order", None, "BADC")]),
+ "modbus-byteorder-dcba": ("Meter floats fully little-endian (PRTG Byte Order 'Little-endian (DC BA)' needed).", [("modbus", "fault", "byte_order", None, "DCBA")]),
+ "modbus-slow-plc":       ("PLC answers after 3 s -> client timeouts / sensor goes down intermittently.", [("modbus", "fault", "delay_ms", None, 3000)]),
+ "modbus-flaky-link":     ("30% of requests: TCP connection dropped without reply (bad gateway/cable).", [("modbus", "fault", "drop_connection", None, 0.3)]),
+ "modbus-device-busy":    ("Unit 1 answers every request with exception 6 (SERVER_DEVICE_BUSY).", [("modbus", "fault", "exception", "1", 6)]),
+ "modbus-no-reply":       ("Device accepts connection but never answers (hung firmware).", [("modbus", "fault", "no_response", None, True)]),
+ "modbus-idle-disconnect":("Server closes idle connections after 5 s (firewall/NAT timeout look-alike).", [("modbus", "fault", "idle_timeout", None, 5)]),
+ "modbus-frozen-values":  ("Values stop changing (stuck sensor / stale cache).", [("modbus", "fault", "freeze_values", None, True)]),
+ "modbus-conn-limit":     ("Device only allows 1 TCP connection; second client is refused.", [("modbus", "fault", "max_connections", None, 1)]),
+ "netapp-volume-full":    ("vol_db01 at 98.5% used + EMS alert.", [("netapp", "fault", "volume_full", "vol_db01", True)]),
+ "netapp-aggr-nearly-full":("aggr1_n1 at 96.5% used + EMS alert.", [("netapp", "fault", "aggr_full", "aggr1_n1", True)]),
+ "netapp-volume-offline": ("vol_backup offline (LUN/volume unavailable).", [("netapp", "fault", "volume_offline", "vol_backup", True)]),
+ "netapp-disk-failure":   ("Disk 1.0.5 broken, RAID reconstruct EMS event.", [("netapp", "fault", "disk_fail", "1.0.5", True)]),
+ "netapp-node-down":      ("Node labcluster01-01 down, takeover by partner, ports down, cluster degraded.", [("netapp", "fault", "node_down", "labcluster01-01", True)]),
+ "netapp-api-slow":       ("Every API call takes 8 s (sensor scan time out).", [("netapp", "fault", "api_delay_ms", None, 8000)]),
+ "netapp-api-503":        ("API returns HTTP 503 for every call.", [("netapp", "fault", "api_error", None, 503)]),
+ "netapp-auth-fail":      ("Valid credentials rejected with 401 (expired password/role change).", [("netapp", "fault", "auth_fail", None, True)]),
+ "netapp-snapmirror-broken":("SnapMirror relationship broken_off + unhealthy.", [("netapp", "fault", "snapmirror_broken", None, True)]),
+ "netapp-high-latency":   ("vol_db01 latency ~25 ms.", [("netapp", "fault", "high_latency", "vol_db01", 25)]),
+ "mqtt-device-dropout":   ("plc-01 drops ungracefully for 60 s -> broker fires Last Will (status=offline), device reconnects.", [("mqtt", "action", "kill_connection", "plc-01", 60)]),
+ "mqtt-stale-data":       ("plc-01 stays connected but stops publishing (silent failure).", [("mqtt", "fault", "pause", "plc-01", True)]),
+ "mqtt-garbage-payload":  ("sensor-02 publishes corrupt non-UTF8 payloads (parser errors).", [("mqtt", "fault", "garbage", "sensor-02", True)]),
+ "mqtt-oversize-message": ("300 KB message exceeds broker limit (262144): see broker log + disconnect.", [("mqtt", "action", "oversize", "plc-01", 300000)]),
+ "mqtt-message-burst":    ("500 QoS1 messages at once (inflight/queue limits).", [("mqtt", "action", "burst", "plc-01", 500)]),
+}
+
+
+def call(sim, method, path, body=None):
+    req = urllib.request.Request(f"http://{HOST}:{SIMS[sim]}{path}", method=method, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"content-type": "application/json"})
+    try:
+        return json.load(urllib.request.urlopen(req, timeout=10))
+    except Exception as e:
+        return {"error": f"{sim} unreachable: {e}"}
+
+
+def conv(v):
+    if v is None: return True
+    for t in (int, float):
+        try: return t(v)
+        except ValueError: pass
+    return v
+
+
+def run_step(sim, kind, name, target, value):
+    body = {"name": name, **({"target": target} if target else {}), **({"value": value} if value is not None else {})}
+    print(f"  {sim}: {kind} {name} target={target} value={value} ->", json.dumps(call(sim, "POST", f"/_lab/{kind}", body))[:200])
+
+
+def main():
+    p = argparse.ArgumentParser(prog="labctl"); sp = p.add_subparsers(dest="cmd", required=True)
+    sp.add_parser("status")
+    f = sp.add_parser("fault"); f.add_argument("sim", choices=SIMS); f.add_argument("name"); f.add_argument("--target"); f.add_argument("--value")
+    a = sp.add_parser("action"); a.add_argument("sim", choices=SIMS); a.add_argument("name"); a.add_argument("--target"); a.add_argument("--value")
+    c = sp.add_parser("clear"); c.add_argument("sim", nargs="?", choices=SIMS)
+    l = sp.add_parser("logs"); l.add_argument("sim", choices=SIMS); l.add_argument("-n", type=int, default=30); l.add_argument("--event", default="")
+    s = sp.add_parser("scenario"); s.add_argument("name", help="name | list | reset")
+    t = sp.add_parser("timeline"); t.add_argument("-n", type=int, default=60); t.add_argument("--grep", default="")
+    sp.add_parser("bundle")
+    x = p.parse_args()
+
+    if x.cmd == "status":
+        for sim in SIMS: print(f"== {sim}"); print(json.dumps(call(sim, "GET", "/_lab/state"), indent=1))
+    elif x.cmd in ("fault", "action"):
+        run_step(x.sim, x.cmd, x.name, x.target, conv(x.value) if x.value is not None else None)
+    elif x.cmd == "clear":
+        for sim in ([x.sim] if x.sim else SIMS): print(sim, call(sim, "DELETE", "/_lab/fault"))
+    elif x.cmd == "logs":
+        for r in call(x.sim, "GET", f"/_lab/log?n={x.n}&event={x.event}"): print(json.dumps(r))
+    elif x.cmd == "scenario":
+        if x.name == "list":
+            for k, (d, _) in SCENARIOS.items(): print(f"{k:28} {d}")
+        elif x.name == "reset":
+            for sim in SIMS: call(sim, "DELETE", "/_lab/fault")
+            print("all faults cleared")
+        elif x.name in SCENARIOS:
+            print(f"scenario {x.name}: {SCENARIOS[x.name][0]}")
+            for st in SCENARIOS[x.name][1]: run_step(*st)
+            print("Reset with: labctl scenario reset   |   Evidence: labctl timeline")
+        else: sys.exit("unknown scenario (labctl scenario list)")
+    elif x.cmd == "timeline":
+        rows = []
+        for fn in glob.glob(os.path.join(HERE, "logs", "*.jsonl")):
+            for line in open(fn, errors="replace"):
+                try: rows.append(json.loads(line))
+                except ValueError: pass
+        rows.sort(key=lambda r: r["ts"])
+        for r in [r for r in rows if x.grep in json.dumps(r)][-x.n:]:
+            rest = {k: v for k, v in r.items() if k not in ("ts", "sim", "event", "active_faults", "req_hex", "resp_hex", "resp_preview", "req_headers")}
+            print(r["ts"][11:23], f'{r["sim"]:7}', f'{r["event"]:14}', json.dumps(rest)[:230], "| FAULTS" if r.get("active_faults") else "")
+    elif x.cmd == "bundle":
+        ts = time.strftime("%Y%m%d-%H%M%S"); out = os.path.join(HERE, f"support-bundle-{ts}.tar.gz"); tmp = os.path.join(HERE, f".bundle-{ts}"); os.makedirs(tmp)
+        for sim in SIMS: json.dump(call(sim, "GET", "/_lab/state"), open(f"{tmp}/state-{sim}.json", "w"), indent=1)
+        for sim in SIMS: json.dump(call(sim, "GET", "/_lab/log?n=5000"), open(f"{tmp}/recent-{sim}.json", "w"), indent=1)
+        for cmd, fn in ((["docker", "compose", "logs", "--no-color", "--timestamps"], "docker-logs.txt"), (["docker", "compose", "ps"], "docker-ps.txt")):
+            try: open(f"{tmp}/{fn}", "w").write(subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout)
+            except Exception as e: open(f"{tmp}/{fn}", "w").write(f"not available: {e}")
+        open(f"{tmp}/README.txt", "w").write(f"Support bundle {ts}\nstate-*.json: current simulator state + active faults\nrecent-*.json: last 5000 events per simulator\n"
+                                              f"logs/*.jsonl (full history), docker-logs.txt (incl. Mosquitto broker log), capture.pcap if present.\n")
+        with tarfile.open(out, "w:gz") as tf:
+            tf.add(tmp, arcname="bundle")
+            for fn in glob.glob(os.path.join(HERE, "logs", "*")):
+                if os.path.isfile(fn): tf.add(fn, arcname="bundle/logs/" + os.path.basename(fn))
+        subprocess.run(["rm", "-rf", tmp]); print("created", out)
+
+
+main()

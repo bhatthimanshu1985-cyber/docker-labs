@@ -1,0 +1,3 @@
+logs/*
+!logs/.gitkeep
+support-bundle-*.tar.gz
